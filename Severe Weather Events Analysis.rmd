@@ -1,0 +1,144 @@
+---
+title: Analysis of Weather Events, Impacts on Public Health and U.S. Economy [1950
+  - 2011]
+author: "Noor Ahmed"
+date: "Sunday, September 21, 2014"
+output: html_document
+---
+
+## Synopsis
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This report presents an analysis from exploring the NOAA storm database and provides an analytical overview aimed at addressing the below research questions to help the government in preparing for severe weather events and prioritize resources for different types of events accordingly.  
+
+### Research Questions
+1. Across the United States, which types of events (as indicated in the EVTYPE variable) are most    harmful with respect to population health?
+2. Across the United States, which types of events have the greatest economic consequences?
+
+### Answers
+1. **Tornadoes** are the most harmful storm type, with respect to population health, causing an estimated 96915 casualties (fatalities and injuries) in the United States from 1950 to 2011.
+2. **Floods** are the most costly storm type, incurring an estimated total economic costs (property damages plus crop damages) of 150 Billion USD from 1950 to 2011.
+
+## Data Processing
+#### About Raw Data
+The NOAA Storm Database is used as raw data. From the same source you can also obtain the [Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) and [FAQ](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf). The raw data for this analysis comes in the form of a comma-separated-value file compressed via the bzip2 algorithm to reduce its size. 
+
+Note: The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years data is more complete.
+
+#### Load required packages and Download data
+```{r loadpackages}
+packages <- c("chron","data.table", "ggplot2", "xtable", "utils", "knitr","lubridate","plyr")
+sapply(packages, require, character.only=TRUE, quietly=TRUE)
+```
+
+#### Download (NOAA) storm database file and read the file
+```{r download_and_unzip, cache= TRUE}
+if(!file.exists("./data/StormData.csv.bz2")) {
+  dir.create("./data")
+  url<-"https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+  download.file(url, destfile="./data/StormData.csv.bz2")
+  datDownloaded<-date()
+  }
+stormdata <- read.csv("./data/StormData.csv.bz2", header=TRUE, stringsAsFactors=FALSE)
+```
+
+
+#### Subsetting Data with required columns
+The following columns will be extracted from the raw data to form the relevant subset:
+
+* EVTYPE: A factor variable indicating the type of storm event.
+* FATALITIES: The number of fatalities attributed to the storm event (note it is unclear from the associated documentation whether these are direct fatalities, indirect fatalities, or both).
+* INJURIES: The number of injuries attributed to the storm event (again it is unclear from the associated documentation whether these are direct fatalities, indirect fatalities, or both).
+* PROPDMG: The estimated amount of damage to property incurred by the weather event.
+* PROPDMGEXP: A factor variable indicating the magnitude of the property damage estimate (where k = 1000 USD, M = 1000000 USD, and B = 1000000000 USD).
+* CROPDMG: The estimated amount of damage to crops incurred by the weather event.
+* CROPDMGEXP: A factor variable indicating the magnitude of the crop damage estimate (where k = 1000 USD, M = 1000000 USD, and B = 1000000000 USD).
+
+```{r}
+myvars <- c("EVTYPE","FATALITIES","INJURIES","PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP")
+datasubset1 <- stormdata[ , myvars]
+```
+
+#### Cleaning Data
+Based on observation criteria, only entries with valid PROPDMGEXP and CROPDMGEXP entries will be accepted (defined as those with no entry, "K", "M", or "B"). 
+Note: This excludes a trivial proportion of the data with invalid values entered into this field (i.e. numeric or other symbolic values).
+```{r}
+datasubset2 <- datasubset1[which(datasubset1$PROPDMGEXP %in% c("","K","M","B")),]
+datasubset3 <- datasubset2[which(datasubset2$CROPDMGEXP %in% c("","K","M","B")),]
+```
+
+Next, PROPDMGEXP and CROPDMGEXP will be converted into numeric variables (for example, K corresponding to 1000).
+
+```{r}
+PROPEXPkey <- data.frame(EXP = c("","K","M","B"), NumericPROPEXP = c(1,1000,1000000,1000000000))
+mergeddata <- merge(x= datasubset3, y=PROPEXPkey, by.x="PROPDMGEXP", by.y="EXP",all=TRUE)
+CROPEXPkey <- data.frame(EXP = c("","K","M","B"), NumericCROPEXP = c(1,1000,1000000,1000000000))
+mergeddata <- merge(x= mergeddata, y=CROPEXPkey, by.x="CROPDMGEXP", by.y="EXP",all=TRUE)
+mergeddata <- mergeddata[,c(3,4,5,6,8,7,9)]
+```
+
+The next step in data processing is to create four new variables:
+
+* CASUALTIES: This new numeric variable is the total number of FATALITIES and injuries, calculated as CASUALTIES = FATALITIES + INJURIES.
+* TOTALPROPDMG: This new numeric variable is the total property damage, in USD, calculated as TOTALPROPDMG = PROPDMG * NumericPROPDMGEXP.
+* TOTALCROPDMG: This new numeric variable is the total crop damage, in USD, calculated as TOTALCROPDMG =  CROPDMG * NumericCROPDMGEXP.
+* TOTALDMG: This new numeric variable is the total damage, in USD, calculated as TOTALDMG = TOTALCROPDMG + TOTALPROPDMG.
+
+Once these new variables have been calculated, a new, cleaner dataset will be produced with just EVTYPE, FATALITIES, INJURIES, CASUALTIES, TOTALPROPDMG, TOTALCROPMDG, and TOTALDMG.
+
+```{r}
+mergeddata$CASUALTIES  <- {mergeddata$FATALITIES + mergeddata$INJURIES}
+mergeddata$TOTALPROPDMG <- {mergeddata$PROPDMG * mergeddata$NumericPROPEXP}
+mergeddata$TOTALCROPDMG <- {mergeddata$CROPDMG * mergeddata$NumericCROPEXP}
+mergeddata$TOTALDMG     <- {mergeddata$TOTALCROPDMG + mergeddata$TOTALPROPDMG}
+finaldata <- mergeddata[,c(1,2,3,8,9,10,11)]
+```
+
+## Results
+
+Now, we will proceed with the analysis for addressing the below questions:
+
+#### 1) Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+
+To determine harmful effects on population health, the total number of casualties will be calculated for each type of storm event. Note that this is a broad interpretation of public health impact as it includes both fatalities and injuries. Additionally, note that the total (i.e. sum) is being used as the summary statistic, not mean, median, or other normalized statistic. This is because the research question we are trying to answer is "which type of events are most harmful with respect to population health"? The total cummulative impact of all storms of a given type on the US population is the correct metric to answer this question, since it reveals th overall public health impact of that type of storm.
+
+** Impacts on US Population Health from 1950 to 2011 - By Event Type **
+```{r}
+totalcasualties <- aggregate(finaldata$CASUALTIES, by=list(EVTYPE=finaldata$EVTYPE), sum)
+colnames(totalcasualties) <- c("EVTYPE", "TOTALCASUALTIES")
+sortcasualties <- totalcasualties[order(-totalcasualties$TOTALCASUALTIES),]
+attach(sortcasualties)
+plot(TOTALCASUALTIES[1:20], yaxt="n", main="Total US Casualties by Storm Type, 1950-2011", 
+           xlab="Rank by Total Casualties", ylab="Total Casualties", ylim = c(0,100000), pch=18, col="blue")
+axis(2, at=c(0,50000,100000), labels = c("0","50000","100000"))
+text(TOTALCASUALTIES[1:5] + c(0,5000,3000,1000,0), labels = EVTYPE[1:5], cex=0.6, pos=4, col="red")
+```
+
+```{r}
+detach(sortcasualties)
+```
+
+**Based on the above analysis, the most harmful type of storm to public health were Tornadoes, with 9.6915 × 104 casualties (fatalities and injuries) in the United States from 1950 to 2011.**
+
+
+
+#### 2) Across the United States, which types of events have the greatest economic consequences?
+
+To determine the economic consequences of storms, the total cost in property and crop damages will be calculated for each type of storm event. Again, note that the total (i.e. sum) is being used as the summary statistic, not mean, median, or other normalized statistic. This is because the research question we are trying to determine a cummulative impact of all storms of a given type on the US economy.
+** Impacts on the US Economy from 1950 to 2011 - By Event Type **
+```{r}
+totalcost <- aggregate(finaldata$TOTALDMG, by=list(EVTYPE=finaldata$EVTYPE), sum)
+colnames(totalcost) <- c("EVTYPE", "TOTALDMG")
+sortcost <- totalcost[order(-totalcost$TOTALDMG),]
+attach(sortcost)
+plot(TOTALDMG[1:20]/1000000000, yaxt="n", main="Total Economic Costs by Storm Type, 1950-2011", 
+           xlab="Rank by Total Cost", ylab="Total Cost (Billion USD)", ylim = c(0,200), pch=18, col="blue")
+axis(2, at=c(0,100,200), labels = c("0","100","200"))
+text(TOTALDMG[1:5]/1000000000 + c(0,0,0,0,4), labels = EVTYPE[1:5], cex=0.6, pos=4, col="red")
+```
+
+```{r}
+detach(sortcost)
+```
+
+**Based on the above analysis, the most damaging type of storm to the US Economy are floods with total property and crop damages estimated at 1.5032 × 1011 USD from 1950 to 2011.**
