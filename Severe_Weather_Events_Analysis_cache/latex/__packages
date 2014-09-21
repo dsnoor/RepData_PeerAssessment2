@@ -1,0 +1,14 @@
+base
+chron
+data.table
+datasets
+ggplot2
+graphics
+grDevices
+knitr
+lubridate
+methods
+plyr
+stats
+utils
+xtable
